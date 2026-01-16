@@ -44,7 +44,7 @@ PIZZAS: Dict[str, List[str]] = {
 
     # Nuevas (según tu foto)
     "CEPS (Font d'Argent)": ["nata/crema", "mozzarella", "ceps", "carne picada (buey)"],
-    "LA PORTELLA": ["crema de calabaza", "mozzarella", "gorgonzola", "burrata", "piñones", "orégano"],
+    "LA PORTELLA": ["crema de calabaza", "mozzarella", "gorgonzola"],
 
     # Pesto
     "MORTA PEST": ["pesto", "mozzarella"],
