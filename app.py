@@ -1,8 +1,9 @@
+
 import json
 import random
 import time
 from dataclasses import dataclass, asdict
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Set
 
 import pandas as pd
 import streamlit as st
@@ -11,12 +12,9 @@ import streamlit as st
 # =========================
 # Datos (pizzas + ingredientes)
 # =========================
-# Nota: "ingredientes" = lo que querés recordar para armar la pizza.
-# Si querés, después agregamos "extras/otros agregan" como segundo nivel.
-
 PIZZAS: Dict[str, List[str]] = {
     # Salsa de tomate
-    "0 - MARINARA": ["salsa de tomate", "hierbas de Provenza"],
+    "0 - MARINARA": ["salsa de tomate"],
     "N. 1": ["salsa de tomate", "mozzarella"],
     "SERRANO": ["salsa de tomate", "mozzarella"],
     "N. 15": ["salsa de tomate", "mozzarella", "pepperoni picante"],
@@ -26,10 +24,10 @@ PIZZAS: Dict[str, List[str]] = {
     "CALAMARS": ["calamar en su tinta negra", "mozzarella", "queso brie"],
     "N. THON": ["salsa de tomate", "mozzarella", "atún", "cebolla caramelizada"],
     "N. ANCHOIS": ["salsa de tomate", "mozzarella", "anchoas", "tomates cherry", "alcaparras"],
-    "N. 12": ["salsa de tomate", "mozzarella", "queso de cabra", "queso azul", "parmesano"],
+    "N. 12": ["salsa de tomate", "mozzarella", "queso de cabra", "queso azul"],
     "N. 21": ["salsa de tomate", "mozzarella", "queso brie", "trufa (tofona)"],
     "N. CANILL": ["salsa de tomate", "mozzarella", "panceta a la pimienta", "scamorza (queso ahumado)"],
-    "N. CECINA": ["salsa de tomate", "mozzarella", "cecina de León", "queso de cabra"],
+    "N. CECINA": ["salsa de tomate", "mozzarella", "queso de cabra"],
     "N. 14": ["salsa de tomate", "mozzarella", "champiñones", "alcachofas", "cebolla caramelizada", "tomates cherry"],
     "VEGAN!": ["salsa de tomate", "queso vegano", "champiñones", "alcachofas", "tomates cherry", "cebolla caramelizada"],
 
@@ -42,19 +40,19 @@ PIZZAS: Dict[str, List[str]] = {
     "N. 8": ["nata/crema", "mozzarella", "queso de cabra", "cebolla caramelizada", "tomates cherry"],
     "N. CURRY": ["nata/crema", "curry", "mozzarella", "pollo", "cebolla caramelizada"],
 
-    # Nuevas (según tu foto)
-    "CEPS (Font d'Argent)": ["nata/crema", "mozzarella", "ceps", "carne picada (buey)"],
+    # Nuevas
+    "CEPS (Font d'Argent)": ["nata/crema", "mozzarella", "carne picada (buey)"],
     "LA PORTELLA": ["crema de calabaza", "mozzarella", "gorgonzola"],
 
     # Pesto
     "MORTA PEST": ["pesto", "mozzarella"],
-    "PESTO XERRI": ["pesto", "mozzarella", "tomates cherry", "parmesano"],
+    "PESTO XERRI": ["pesto", "mozzarella", "tomates cherry"],
 
     # Pimienta
     "POIVRE": ["salsa a la pimienta", "mozzarella", "champiñones", "carne picada (buey)"],
 
     # Especial
-    "MAGRET": ["mozzarella", "confit de pato", "comté", "parmesano francés"],
+    "MAGRET": ["mozzarella", "confit de pato", "comté"],
 }
 
 
@@ -99,24 +97,32 @@ def deserialize_stats(text: str) -> Dict[str, PizzaStats]:
     return out
 
 
-def pick_next_pizza(stats: Dict[str, PizzaStats], only_wrong: bool = False) -> str:
+def pick_next_pizza(
+    stats: Dict[str, PizzaStats],
+    only_wrong: bool = False,
+    candidates: List[str] | None = None,
+) -> str:
     now = time.time()
 
-    candidates = list(PIZZAS.keys())
-    if only_wrong:
-        candidates = [p for p in candidates if stats[p].wrong > 0] or list(PIZZAS.keys())
+    pool = candidates[:] if candidates else list(PIZZAS.keys())
 
-    # Peso: más wrong => más probabilidad; si hace mucho que no sale => también sube.
+    if only_wrong:
+        pool_wrong = [p for p in pool if stats[p].wrong > 0]
+        pool = pool_wrong or pool
+
+    if not pool:
+        pool = list(PIZZAS.keys())
+
     weights: List[float] = []
-    for p in candidates:
+    for p in pool:
         stp = stats[p]
-        recency_boost = min(3.0, (now - (stp.last_seen_ts or 0.0)) / 120.0)  # cada ~2 min sube
+        recency_boost = min(3.0, (now - (stp.last_seen_ts or 0.0)) / 120.0)
         wrong_boost = 1.0 + (stp.wrong * 2.5)
-        mastery_penalty = max(0.25, 1.0 - (stp.correct / max(1, stp.seen)))  # si la tenés dominada, baja
+        mastery_penalty = max(0.25, 1.0 - (stp.correct / max(1, stp.seen)))
         w = (wrong_boost * mastery_penalty) + recency_boost
         weights.append(max(0.1, w))
 
-    return random.choices(candidates, weights=weights, k=1)[0]
+    return random.choices(pool, weights=weights, k=1)[0]
 
 
 # =========================
@@ -125,6 +131,8 @@ def pick_next_pizza(stats: Dict[str, PizzaStats], only_wrong: bool = False) -> s
 st.set_page_config(page_title="Trainer de Pizzas", page_icon="🍕", layout="wide")
 st.title("🍕 Trainer de Pizzas (comandas → ingredientes)")
 
+
+# -------- Session State init --------
 if "stats" not in st.session_state:
     st.session_state.stats = default_stats()
 if "score" not in st.session_state:
@@ -133,12 +141,108 @@ if "streak" not in st.session_state:
     st.session_state.streak = 0
 if "total" not in st.session_state:
     st.session_state.total = 0
+
+# NUEVO: modo + selección manual (Opción A)
+if "practice_mode" not in st.session_state:
+    st.session_state.practice_mode = "Todas"
+if "selected_pizzas" not in st.session_state:
+    st.session_state.selected_pizzas = []  # set manual (arranca vacío)
+
+
+def current_candidates() -> List[str] | None:
+    if st.session_state.practice_mode == "Selección manual":
+        # si el set está vacío, usa todas para que no se rompa
+        return st.session_state.selected_pizzas or list(PIZZAS.keys())
+    return None
+
+
+def current_only_wrong() -> bool:
+    return st.session_state.practice_mode == "Reforzar falladas"
+
+
+# current debe inicializarse DESPUÉS de las helpers
 if "current" not in st.session_state:
-    st.session_state.current = pick_next_pizza(st.session_state.stats)
+    st.session_state.current = pick_next_pizza(
+        st.session_state.stats,
+        only_wrong=current_only_wrong(),
+        candidates=current_candidates(),
+    )
+
 if "last_result" not in st.session_state:
     st.session_state.last_result = None  # (ok: bool, msg: str)
 
+
+# -------- Sidebar config (Opción A) --------
+with st.sidebar:
+    st.header("⚙️ Configuración de práctica")
+
+    st.session_state.practice_mode = st.radio(
+        "Modo",
+        ["Todas", "Reforzar falladas", "Selección manual"],
+        index=["Todas", "Reforzar falladas", "Selección manual"].index(st.session_state.practice_mode),
+    )
+
+    if st.session_state.practice_mode == "Selección manual":
+        st.subheader("🎯 Set de práctica")
+
+        query = st.text_input("Buscar pizza (por nombre o número)", value="")
+        options = list(PIZZAS.keys())
+
+        if query.strip():
+            q = query.strip().lower()
+            filtered = [p for p in options if q in p.lower()]
+        else:
+            filtered = options[:10]  # para no mostrar todo de golpe
+
+        to_add = st.selectbox(
+            "Agregar una pizza",
+            options=["— Elegí —"] + filtered,
+            index=0
+        )
+
+        col_add, col_clear = st.columns(2)
+        with col_add:
+            if st.button("➕ Agregar", use_container_width=True):
+                if to_add != "— Elegí —" and to_add not in st.session_state.selected_pizzas:
+                    st.session_state.selected_pizzas.append(to_add)
+
+        with col_clear:
+            if st.button("🧹 Vaciar set", use_container_width=True):
+                st.session_state.selected_pizzas = []
+
+        st.divider()
+        st.write("**Seleccionadas:**")
+
+        if not st.session_state.selected_pizzas:
+            st.info("No agregaste pizzas todavía. Si queda vacío, uso todas.")
+        else:
+            # lista con botón de quitar
+            for p in st.session_state.selected_pizzas:
+                c1, c2 = st.columns([6, 1])
+                with c1:
+                    st.write(p)
+                with c2:
+                    if st.button("✖", key=f"rm_{p}"):
+                        st.session_state.selected_pizzas = [x for x in st.session_state.selected_pizzas if x != p]
+                        st.rerun()
+
+    st.divider()
+    st.caption("Tip: armá un set chiquito con las difíciles y practicá solo esas.")
+
+
+# Si el current quedó fuera del pool manual, lo re-elige
+if st.session_state.practice_mode == "Selección manual":
+    pool = st.session_state.selected_pizzas or list(PIZZAS.keys())
+    if st.session_state.current not in pool:
+        st.session_state.current = pick_next_pizza(
+            st.session_state.stats,
+            only_wrong=False,
+            candidates=pool,
+        )
+
+
 tab_quiz, tab_repaso, tab_progreso = st.tabs(["🎯 Juego", "📚 Repaso", "💾 Progreso"])
+
 
 with tab_quiz:
     colA, colB, colC, colD = st.columns(4)
@@ -150,7 +254,7 @@ with tab_quiz:
         acc = (st.session_state.score / st.session_state.total * 100) if st.session_state.total else 0.0
         st.metric("Precisión (%)", f"{acc:.1f}")
     with colD:
-        only_wrong = st.toggle("Reforzar falladas (solo falladas)", value=False)
+        st.caption(f"Modo: **{st.session_state.practice_mode}**")
 
     st.divider()
 
@@ -174,7 +278,11 @@ with tab_quiz:
         next_btn = st.button("➡️ Siguiente (sin corregir)", use_container_width=True)
 
     if next_btn:
-        st.session_state.current = pick_next_pizza(st.session_state.stats, only_wrong=only_wrong)
+        st.session_state.current = pick_next_pizza(
+            st.session_state.stats,
+            only_wrong=current_only_wrong(),
+            candidates=current_candidates(),
+        )
         st.session_state.last_result = None
         st.rerun()
 
@@ -206,7 +314,11 @@ with tab_quiz:
             st.session_state.last_result = (False, "\n\n".join(msg_parts))
 
         # siguiente
-        st.session_state.current = pick_next_pizza(st.session_state.stats, only_wrong=only_wrong)
+        st.session_state.current = pick_next_pizza(
+            st.session_state.stats,
+            only_wrong=current_only_wrong(),
+            candidates=current_candidates(),
+        )
         st.rerun()
 
     if st.session_state.last_result is not None:
@@ -229,6 +341,7 @@ with tab_quiz:
         df_wrong = pd.DataFrame(wrong_rows, columns=["Pizza", "Errores", "Vistas", "Aciertos"])
         st.dataframe(df_wrong, use_container_width=True, hide_index=True)
 
+
 with tab_repaso:
     st.subheader("📚 Tabla completa (comanda → ingredientes)")
     rows = []
@@ -236,6 +349,7 @@ with tab_repaso:
         rows.append({"Comanda": name, "Ingredientes": ", ".join(ings)})
     df = pd.DataFrame(rows).sort_values("Comanda")
     st.dataframe(df, use_container_width=True, hide_index=True)
+
 
 with tab_progreso:
     st.subheader("💾 Exportar / Importar progreso")
@@ -270,7 +384,11 @@ with tab_progreso:
         st.session_state.score = 0
         st.session_state.streak = 0
         st.session_state.total = 0
-        st.session_state.current = pick_next_pizza(st.session_state.stats)
+        st.session_state.current = pick_next_pizza(
+            st.session_state.stats,
+            only_wrong=current_only_wrong(),
+            candidates=current_candidates(),
+        )
         st.session_state.last_result = None
         st.success("Listo: progreso reseteado.")
 
