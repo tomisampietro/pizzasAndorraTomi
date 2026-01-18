@@ -1,4 +1,3 @@
-
 import json
 import random
 import time
@@ -54,6 +53,26 @@ PIZZAS: Dict[str, List[str]] = {
     # Especial
     "MAGRET": ["mozzarella", "confit de pato", "comté"],
 }
+
+# =========================
+# Modo difícil: set fijo
+# =========================
+DIFFICULT_PIZZAS = [
+    "POIVRE",
+    "MAGRET",
+    "CEPS (Font d'Argent)",
+    "LA PORTELLA",
+    "N. 5",
+    "N. 19",
+    "N. 8",
+    "N. CURRY",
+    "N. 21",
+    "N. CANILL",
+    "N. ANCHOIS",
+    "N. CECINA",
+    "CALAMARS",
+]
+DIFFICULT_PIZZAS = [p for p in DIFFICULT_PIZZAS if p in PIZZAS]  # por seguridad
 
 
 def all_ingredients(pizzas: Dict[str, List[str]]) -> List[str]:
@@ -125,6 +144,30 @@ def pick_next_pizza(
     return random.choices(pool, weights=weights, k=1)[0]
 
 
+def build_spaced_reinforcement_sequence(
+    target: str,
+    pool: List[str],
+    repeats: int = 5,
+) -> List[str]:
+    """
+    Devuelve una secuencia tipo "espaciado progresivo":
+    target, (0 otras), target, (1 otra), target, (2 otras), ... hasta repeats.
+    """
+    others = [p for p in pool if p != target]
+    seq: List[str] = []
+
+    for i in range(repeats):
+        seq.append(target)
+
+        gap = i  # 0,1,2,3,4 -> espaciado progresivo
+        for _ in range(gap):
+            if not others:
+                break
+            seq.append(random.choice(others))
+
+    return seq
+
+
 # =========================
 # UI
 # =========================
@@ -142,17 +185,22 @@ if "streak" not in st.session_state:
 if "total" not in st.session_state:
     st.session_state.total = 0
 
-# NUEVO: modo + selección manual (Opción A)
+# modos
 if "practice_mode" not in st.session_state:
     st.session_state.practice_mode = "Todas"
 if "selected_pizzas" not in st.session_state:
     st.session_state.selected_pizzas = []  # set manual (arranca vacío)
 
+# cola de refuerzo (solo se usa en modo Difícil)
+if "review_queue" not in st.session_state:
+    st.session_state.review_queue = []  # lista de pizzas por mostrar pronto
+
 
 def current_candidates() -> List[str] | None:
     if st.session_state.practice_mode == "Selección manual":
-        # si el set está vacío, usa todas para que no se rompa
         return st.session_state.selected_pizzas or list(PIZZAS.keys())
+    if st.session_state.practice_mode == "Difícil":
+        return DIFFICULT_PIZZAS or list(PIZZAS.keys())
     return None
 
 
@@ -160,26 +208,43 @@ def current_only_wrong() -> bool:
     return st.session_state.practice_mode == "Reforzar falladas"
 
 
-# current debe inicializarse DESPUÉS de las helpers
-if "current" not in st.session_state:
-    st.session_state.current = pick_next_pizza(
+def pick_next_with_queue() -> str:
+    """
+    Si estamos en modo Difícil y hay cola de refuerzo, sale de ahí.
+    Si no, usa el picker normal con candidates/only_wrong según modo.
+    """
+    if st.session_state.practice_mode == "Difícil" and st.session_state.review_queue:
+        # Asegurar que lo que salga esté dentro del pool difícil (por seguridad)
+        pool = current_candidates() or list(PIZZAS.keys())
+        while st.session_state.review_queue:
+            nxt = st.session_state.review_queue.pop(0)
+            if nxt in pool:
+                return nxt
+        # si se vació por items inválidos, cae al picker normal
+
+    return pick_next_pizza(
         st.session_state.stats,
         only_wrong=current_only_wrong(),
         candidates=current_candidates(),
     )
 
+
+# current debe inicializarse DESPUÉS de helpers
+if "current" not in st.session_state:
+    st.session_state.current = pick_next_with_queue()
+
 if "last_result" not in st.session_state:
     st.session_state.last_result = None  # (ok: bool, msg: str)
 
 
-# -------- Sidebar config (Opción A) --------
+# -------- Sidebar config --------
 with st.sidebar:
     st.header("⚙️ Configuración de práctica")
 
     st.session_state.practice_mode = st.radio(
         "Modo",
-        ["Todas", "Reforzar falladas", "Selección manual"],
-        index=["Todas", "Reforzar falladas", "Selección manual"].index(st.session_state.practice_mode),
+        ["Todas", "Reforzar falladas", "Selección manual", "Difícil"],
+        index=["Todas", "Reforzar falladas", "Selección manual", "Difícil"].index(st.session_state.practice_mode),
     )
 
     if st.session_state.practice_mode == "Selección manual":
@@ -216,7 +281,6 @@ with st.sidebar:
         if not st.session_state.selected_pizzas:
             st.info("No agregaste pizzas todavía. Si queda vacío, uso todas.")
         else:
-            # lista con botón de quitar
             for p in st.session_state.selected_pizzas:
                 c1, c2 = st.columns([6, 1])
                 with c1:
@@ -226,19 +290,32 @@ with st.sidebar:
                         st.session_state.selected_pizzas = [x for x in st.session_state.selected_pizzas if x != p]
                         st.rerun()
 
+    if st.session_state.practice_mode == "Difícil":
+        st.subheader("🔥 Modo difícil")
+        st.caption("Solo salen estas pizzas:")
+        st.write(", ".join(DIFFICULT_PIZZAS) if DIFFICULT_PIZZAS else "⚠️ No hay lista difícil configurada.")
+        st.divider()
+        st.write("**Cola de refuerzo (próximas):**")
+        if not st.session_state.review_queue:
+            st.info("Vacía (se llena cuando te equivocás).")
+        else:
+            st.write(" → ".join(st.session_state.review_queue[:12]) + (" ..." if len(st.session_state.review_queue) > 12 else ""))
+        colq1, colq2 = st.columns(2)
+        with colq1:
+            if st.button("🧹 Limpiar cola", use_container_width=True):
+                st.session_state.review_queue = []
+                st.rerun()
+        with colq2:
+            st.write("")
+
     st.divider()
-    st.caption("Tip: armá un set chiquito con las difíciles y practicá solo esas.")
+    st.caption("Tip: en Difícil, si fallás una pizza, vuelve 5 veces con espaciado progresivo.")
 
 
-# Si el current quedó fuera del pool manual, lo re-elige
-if st.session_state.practice_mode == "Selección manual":
-    pool = st.session_state.selected_pizzas or list(PIZZAS.keys())
-    if st.session_state.current not in pool:
-        st.session_state.current = pick_next_pizza(
-            st.session_state.stats,
-            only_wrong=False,
-            candidates=pool,
-        )
+# Si el current quedó fuera del pool del modo actual, lo re-elige
+pool_now = current_candidates() or list(PIZZAS.keys())
+if st.session_state.current not in pool_now:
+    st.session_state.current = pick_next_with_queue()
 
 
 tab_quiz, tab_repaso, tab_progreso = st.tabs(["🎯 Juego", "📚 Repaso", "💾 Progreso"])
@@ -278,11 +355,7 @@ with tab_quiz:
         next_btn = st.button("➡️ Siguiente (sin corregir)", use_container_width=True)
 
     if next_btn:
-        st.session_state.current = pick_next_pizza(
-            st.session_state.stats,
-            only_wrong=current_only_wrong(),
-            candidates=current_candidates(),
-        )
+        st.session_state.current = pick_next_with_queue()
         st.session_state.last_result = None
         st.rerun()
 
@@ -313,12 +386,27 @@ with tab_quiz:
             msg_parts.append(f"**Correcto era:** {', '.join(sorted(list(correct_set)))}")
             st.session_state.last_result = (False, "\n\n".join(msg_parts))
 
+            # 🔥 MODO DIFÍCIL: refuerzo espaciado progresivo (5 repeticiones)
+            if st.session_state.practice_mode == "Difícil":
+                pool = current_candidates() or list(PIZZAS.keys())
+
+                # (opcional) limpiamos ocurrencias previas del mismo target para no inflar demasiado
+                st.session_state.review_queue = [x for x in st.session_state.review_queue if x != pizza_name]
+
+                seq = build_spaced_reinforcement_sequence(
+                    target=pizza_name,
+                    pool=pool,
+                    repeats=5,
+                )
+
+                # Lo ponemos al frente para que empiece "luego del error"
+                st.session_state.review_queue = seq + st.session_state.review_queue
+
+                # límite suave para no crecer infinito
+                st.session_state.review_queue = st.session_state.review_queue[:60]
+
         # siguiente
-        st.session_state.current = pick_next_pizza(
-            st.session_state.stats,
-            only_wrong=current_only_wrong(),
-            candidates=current_candidates(),
-        )
+        st.session_state.current = pick_next_with_queue()
         st.rerun()
 
     if st.session_state.last_result is not None:
@@ -384,11 +472,7 @@ with tab_progreso:
         st.session_state.score = 0
         st.session_state.streak = 0
         st.session_state.total = 0
-        st.session_state.current = pick_next_pizza(
-            st.session_state.stats,
-            only_wrong=current_only_wrong(),
-            candidates=current_candidates(),
-        )
+        st.session_state.review_queue = []
+        st.session_state.current = pick_next_with_queue()
         st.session_state.last_result = None
         st.success("Listo: progreso reseteado.")
-
