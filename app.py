@@ -2,15 +2,17 @@ import json
 import random
 import time
 from dataclasses import dataclass, asdict
-from typing import Dict, List, Set
+from typing import Dict, List, Set, Optional
 
 import pandas as pd
 import streamlit as st
 
 
 # =========================
-# Datos (pizzas + ingredientes)
+# Datos
 # =========================
+
+# --- PIZZAS (ANTES DE HORNO) ---
 PIZZAS: Dict[str, List[str]] = {
     # Salsa de tomate
     "0 - MARINARA": ["salsa de tomate"],
@@ -54,35 +56,79 @@ PIZZAS: Dict[str, List[str]] = {
     "MAGRET": ["mozzarella", "confit de pato", "comté"],
 }
 
+# --- TOPPINGS (DESPUÉS DE HORNO) - lista prioritaria del usuario ---
+POST_HORNO: Dict[str, List[str]] = {
+    "0 - MARINARA": ["albahaca", "aceite de oliva"],
+    "N. 1": ["parmesano", "albahaca", "aceite de oliva"],
+    "N. ANCHOIS": ["albahaca"],                      # ANCHOAS
+    "N. 3": ["orégano"],
+    "N. SOBR": ["crema de nueces", "miel"],
+    "N. 5": ["yema de huevo", "orégano"],
+    "MORTA PEST": ["mortadela", "burrata", "pistachos"],
+    "N. 8": ["miel", "crema de nuez"],
+    "VEGAN!": ["rúcula", "aceite de oliva", "albahaca"],
+    "N. 10": ["orégano"],
+    "N. 12": ["parmesano", "orégano"],
+    "N. 14": ["rúcula", "albahaca", "aceite de oliva"],
+    "N. CURRY": ["nata", "coco rallado"],
+    "PESTO XERRI": ["parmesano", "rúcula", "albahaca", "aceite de oliva"],
+    "N. SPICY": ["piñones"],                          # 18 SPICY
+    "N. AUB, GOR": ["crema de nueces"],
+    "N. 21": ["yema de huevo"],
+    "N. CECINA": ["rúcula", "miel", "orégano"],
+    "N. THON": ["albahaca"],
+    "N. CANILL": ["yema de huevo"],
+    "SAUMON": ["rúcula"],
+    "SERRANO": ["jamón serrano", "burrata", "rúcula", "aceite de oliva", "albahaca"],  # N26 / Salamandres
+    "MAGRET": ["yema de huevo"],
+}
+
+# --- ENSALADAS (castellano) ---
+SALADS: Dict[str, List[str]] = {
+    "N*1 - ABELLETES": ["rúcula", "jamón serrano", "burrata", "tomate", "piñones", "cebolla", "albahaca"],
+    "N*2 - CUBILL": ["rúcula", "cecina de León", "tomate", "miel", "nueces"],
+    "N*3 - ENVALIRA": ["rúcula", "pesto", "atún", "cebolla", "tomate", "piñones"],
+}
+
+DATASETS: Dict[str, Dict[str, List[str]]] = {
+    "Pizzas (antes de horno)": PIZZAS,
+    "Post-horno (toppings)": POST_HORNO,
+    "Ensaladas": SALADS,
+}
+
 # =========================
-# Modo difícil: set fijo
+# Modo difícil por dataset
 # =========================
-DIFFICULT_PIZZAS = [
-    "POIVRE",
-    "MAGRET",
-    "CEPS (Font d'Argent)",
-    "LA PORTELLA",
-    "N. 5",
-    "N. 19",
-    "N. 8",
-    "N. CURRY",
-    "N. 21",
-    "N. CANILL",
-    "N. ANCHOIS",
-    "N. CECINA",
-    "CALAMARS",
-]
-DIFFICULT_PIZZAS = [p for p in DIFFICULT_PIZZAS if p in PIZZAS]  # por seguridad
+DIFFICULT_BY_DATASET: Dict[str, List[str]] = {
+    "Pizzas (antes de horno)": [
+        "POIVRE",
+        "MAGRET",
+        "CEPS (Font d'Argent)",
+        "LA PORTELLA",
+        "N. 5",
+        "N. 19",
+        "N. 8",
+        "N. CURRY",
+        "N. 21",
+        "N. CANILL",
+        "N. ANCHOIS",
+        "N. CECINA",
+        "CALAMARS",
+    ],
+    # para post-horno y ensaladas lo dejamos vacío (si querés, armamos uno después)
+    "Post-horno (toppings)": [],
+    "Ensaladas": [],
+}
 
 
-def all_ingredients(pizzas: Dict[str, List[str]]) -> List[str]:
+# =========================
+# Helpers
+# =========================
+def all_ingredients(items: Dict[str, List[str]]) -> List[str]:
     s: Set[str] = set()
-    for ing_list in pizzas.values():
+    for ing_list in items.values():
         s.update(ing_list)
     return sorted(s)
-
-
-INGREDIENTS_MASTER = all_ingredients(PIZZAS)
 
 
 # =========================
@@ -96,41 +142,47 @@ class PizzaStats:
     last_seen_ts: float = 0.0
 
 
-def default_stats() -> Dict[str, PizzaStats]:
-    return {name: PizzaStats() for name in PIZZAS.keys()}
+def default_stats_for(items: Dict[str, List[str]]) -> Dict[str, PizzaStats]:
+    return {name: PizzaStats() for name in items.keys()}
 
 
-def serialize_stats(stats: Dict[str, PizzaStats]) -> str:
-    payload = {k: asdict(v) for k, v in stats.items()}
+def serialize_stats_store(stats_store: Dict[str, Dict[str, PizzaStats]]) -> str:
+    payload = {
+        dataset: {k: asdict(v) for k, v in stats.items()}
+        for dataset, stats in stats_store.items()
+    }
     return json.dumps(payload, ensure_ascii=False, indent=2)
 
 
-def deserialize_stats(text: str) -> Dict[str, PizzaStats]:
+def deserialize_stats_store(text: str) -> Dict[str, Dict[str, PizzaStats]]:
     raw = json.loads(text)
-    out: Dict[str, PizzaStats] = {}
-    for name in PIZZAS.keys():
-        if name in raw:
-            out[name] = PizzaStats(**raw[name])
-        else:
-            out[name] = PizzaStats()
+    out: Dict[str, Dict[str, PizzaStats]] = {}
+    for dataset_name, items in DATASETS.items():
+        out[dataset_name] = {}
+        ds_raw = raw.get(dataset_name, {})
+        for name in items.keys():
+            if name in ds_raw:
+                out[dataset_name][name] = PizzaStats(**ds_raw[name])
+            else:
+                out[dataset_name][name] = PizzaStats()
     return out
 
 
-def pick_next_pizza(
+def pick_next_item(
+    items: Dict[str, List[str]],
     stats: Dict[str, PizzaStats],
     only_wrong: bool = False,
-    candidates: List[str] | None = None,
+    candidates: Optional[List[str]] = None,
 ) -> str:
     now = time.time()
-
-    pool = candidates[:] if candidates else list(PIZZAS.keys())
+    pool = candidates[:] if candidates else list(items.keys())
 
     if only_wrong:
         pool_wrong = [p for p in pool if stats[p].wrong > 0]
         pool = pool_wrong or pool
 
     if not pool:
-        pool = list(PIZZAS.keys())
+        pool = list(items.keys())
 
     weights: List[float] = []
     for p in pool:
@@ -144,40 +196,34 @@ def pick_next_pizza(
     return random.choices(pool, weights=weights, k=1)[0]
 
 
-def build_spaced_reinforcement_sequence(
-    target: str,
-    pool: List[str],
-    repeats: int = 5,
-) -> List[str]:
-    """
-    Devuelve una secuencia tipo "espaciado progresivo":
-    target, (0 otras), target, (1 otra), target, (2 otras), ... hasta repeats.
-    """
+def build_spaced_reinforcement_sequence(target: str, pool: List[str], repeats: int = 5) -> List[str]:
     others = [p for p in pool if p != target]
     seq: List[str] = []
-
     for i in range(repeats):
         seq.append(target)
-
-        gap = i  # 0,1,2,3,4 -> espaciado progresivo
+        gap = i  # 0,1,2,3,4
         for _ in range(gap):
             if not others:
                 break
             seq.append(random.choice(others))
-
     return seq
 
 
 # =========================
 # UI
 # =========================
-st.set_page_config(page_title="Trainer de Pizzas", page_icon="🍕", layout="wide")
-st.title("🍕 Trainer de Pizzas (comandas → ingredientes)")
-
+st.set_page_config(page_title="Trainer de Carta", page_icon="🍕", layout="wide")
+st.title("🍕 Trainer de Carta (comanda → ingredientes)")
 
 # -------- Session State init --------
-if "stats" not in st.session_state:
-    st.session_state.stats = default_stats()
+if "dataset" not in st.session_state:
+    st.session_state.dataset = "Pizzas (antes de horno)"
+
+if "stats_store" not in st.session_state:
+    st.session_state.stats_store = {
+        name: default_stats_for(items) for name, items in DATASETS.items()
+    }
+
 if "score" not in st.session_state:
     st.session_state.score = 0
 if "streak" not in st.session_state:
@@ -188,19 +234,29 @@ if "total" not in st.session_state:
 # modos
 if "practice_mode" not in st.session_state:
     st.session_state.practice_mode = "Todas"
-if "selected_pizzas" not in st.session_state:
-    st.session_state.selected_pizzas = []  # set manual (arranca vacío)
+if "selected_items" not in st.session_state:
+    st.session_state.selected_items = []  # set manual
 
-# cola de refuerzo (solo se usa en modo Difícil)
+# cola de refuerzo (solo Difícil)
 if "review_queue" not in st.session_state:
-    st.session_state.review_queue = []  # lista de pizzas por mostrar pronto
+    st.session_state.review_queue = []
 
 
-def current_candidates() -> List[str] | None:
+def get_active_items() -> Dict[str, List[str]]:
+    return DATASETS[st.session_state.dataset]
+
+
+def get_active_stats() -> Dict[str, PizzaStats]:
+    return st.session_state.stats_store[st.session_state.dataset]
+
+
+def current_candidates(items: Dict[str, List[str]]) -> Optional[List[str]]:
     if st.session_state.practice_mode == "Selección manual":
-        return st.session_state.selected_pizzas or list(PIZZAS.keys())
+        return st.session_state.selected_items or list(items.keys())
     if st.session_state.practice_mode == "Difícil":
-        return DIFFICULT_PIZZAS or list(PIZZAS.keys())
+        difficult = DIFFICULT_BY_DATASET.get(st.session_state.dataset, [])
+        difficult = [p for p in difficult if p in items]  # seguridad
+        return difficult or list(items.keys())
     return None
 
 
@@ -208,30 +264,23 @@ def current_only_wrong() -> bool:
     return st.session_state.practice_mode == "Reforzar falladas"
 
 
-def pick_next_with_queue() -> str:
-    """
-    Si estamos en modo Difícil y hay cola de refuerzo, sale de ahí.
-    Si no, usa el picker normal con candidates/only_wrong según modo.
-    """
+def pick_next_with_queue(items: Dict[str, List[str]], stats: Dict[str, PizzaStats]) -> str:
     if st.session_state.practice_mode == "Difícil" and st.session_state.review_queue:
-        # Asegurar que lo que salga esté dentro del pool difícil (por seguridad)
-        pool = current_candidates() or list(PIZZAS.keys())
+        pool = current_candidates(items) or list(items.keys())
         while st.session_state.review_queue:
             nxt = st.session_state.review_queue.pop(0)
             if nxt in pool:
                 return nxt
-        # si se vació por items inválidos, cae al picker normal
-
-    return pick_next_pizza(
-        st.session_state.stats,
-        only_wrong=current_only_wrong(),
-        candidates=current_candidates(),
-    )
+    return pick_next_item(items, stats, only_wrong=current_only_wrong(), candidates=current_candidates(items))
 
 
-# current debe inicializarse DESPUÉS de helpers
+ACTIVE_ITEMS = get_active_items()
+ACTIVE_STATS = get_active_stats()
+INGREDIENTS_MASTER = all_ingredients(ACTIVE_ITEMS)
+
+# current
 if "current" not in st.session_state:
-    st.session_state.current = pick_next_with_queue()
+    st.session_state.current = pick_next_with_queue(ACTIVE_ITEMS, ACTIVE_STATS)
 
 if "last_result" not in st.session_state:
     st.session_state.last_result = None  # (ok: bool, msg: str)
@@ -239,7 +288,20 @@ if "last_result" not in st.session_state:
 
 # -------- Sidebar config --------
 with st.sidebar:
-    st.header("⚙️ Configuración de práctica")
+    st.header("⚙️ Configuración")
+
+    st.session_state.dataset = st.selectbox(
+        "Qué practicar",
+        options=list(DATASETS.keys()),
+        index=list(DATASETS.keys()).index(st.session_state.dataset),
+    )
+
+    # refrescar activos tras cambiar dataset
+    ACTIVE_ITEMS = get_active_items()
+    ACTIVE_STATS = get_active_stats()
+    INGREDIENTS_MASTER = all_ingredients(ACTIVE_ITEMS)
+
+    st.divider()
 
     st.session_state.practice_mode = st.radio(
         "Modo",
@@ -250,50 +312,46 @@ with st.sidebar:
     if st.session_state.practice_mode == "Selección manual":
         st.subheader("🎯 Set de práctica")
 
-        query = st.text_input("Buscar pizza (por nombre o número)", value="")
-        options = list(PIZZAS.keys())
+        query = st.text_input("Buscar (nombre / número)", value="")
+        options = list(ACTIVE_ITEMS.keys())
 
         if query.strip():
             q = query.strip().lower()
             filtered = [p for p in options if q in p.lower()]
         else:
-            filtered = options[:10]  # para no mostrar todo de golpe
+            filtered = options[:10]
 
-        to_add = st.selectbox(
-            "Agregar una pizza",
-            options=["— Elegí —"] + filtered,
-            index=0
-        )
+        to_add = st.selectbox("Agregar", options=["— Elegí —"] + filtered, index=0)
 
         col_add, col_clear = st.columns(2)
         with col_add:
             if st.button("➕ Agregar", use_container_width=True):
-                if to_add != "— Elegí —" and to_add not in st.session_state.selected_pizzas:
-                    st.session_state.selected_pizzas.append(to_add)
-
+                if to_add != "— Elegí —" and to_add not in st.session_state.selected_items:
+                    st.session_state.selected_items.append(to_add)
         with col_clear:
             if st.button("🧹 Vaciar set", use_container_width=True):
-                st.session_state.selected_pizzas = []
+                st.session_state.selected_items = []
 
         st.divider()
         st.write("**Seleccionadas:**")
-
-        if not st.session_state.selected_pizzas:
-            st.info("No agregaste pizzas todavía. Si queda vacío, uso todas.")
+        if not st.session_state.selected_items:
+            st.info("Vacío → uso todas.")
         else:
-            for p in st.session_state.selected_pizzas:
+            for p in st.session_state.selected_items:
                 c1, c2 = st.columns([6, 1])
                 with c1:
                     st.write(p)
                 with c2:
-                    if st.button("✖", key=f"rm_{p}"):
-                        st.session_state.selected_pizzas = [x for x in st.session_state.selected_pizzas if x != p]
+                    if st.button("✖", key=f"rm_{st.session_state.dataset}_{p}"):
+                        st.session_state.selected_items = [x for x in st.session_state.selected_items if x != p]
                         st.rerun()
 
     if st.session_state.practice_mode == "Difícil":
+        difficult = DIFFICULT_BY_DATASET.get(st.session_state.dataset, [])
+        difficult = [p for p in difficult if p in ACTIVE_ITEMS]
         st.subheader("🔥 Modo difícil")
-        st.caption("Solo salen estas pizzas:")
-        st.write(", ".join(DIFFICULT_PIZZAS) if DIFFICULT_PIZZAS else "⚠️ No hay lista difícil configurada.")
+        st.caption("Solo salen estos ítems:")
+        st.write(", ".join(difficult) if difficult else "⚠️ No hay lista difícil para este dataset.")
         st.divider()
         st.write("**Cola de refuerzo (próximas):**")
         if not st.session_state.review_queue:
@@ -309,13 +367,13 @@ with st.sidebar:
             st.write("")
 
     st.divider()
-    st.caption("Tip: en Difícil, si fallás una pizza, vuelve 5 veces con espaciado progresivo.")
+    st.caption("Tip: Difícil repite lo fallado 5 veces con espaciado.")
 
 
-# Si el current quedó fuera del pool del modo actual, lo re-elige
-pool_now = current_candidates() or list(PIZZAS.keys())
+# Si current quedó fuera del pool, re-elegir
+pool_now = current_candidates(ACTIVE_ITEMS) or list(ACTIVE_ITEMS.keys())
 if st.session_state.current not in pool_now:
-    st.session_state.current = pick_next_with_queue()
+    st.session_state.current = pick_next_with_queue(ACTIVE_ITEMS, ACTIVE_STATS)
 
 
 tab_quiz, tab_repaso, tab_progreso = st.tabs(["🎯 Juego", "📚 Repaso", "💾 Progreso"])
@@ -331,21 +389,21 @@ with tab_quiz:
         acc = (st.session_state.score / st.session_state.total * 100) if st.session_state.total else 0.0
         st.metric("Precisión (%)", f"{acc:.1f}")
     with colD:
-        st.caption(f"Modo: **{st.session_state.practice_mode}**")
+        st.caption(f"Dataset: **{st.session_state.dataset}** · Modo: **{st.session_state.practice_mode}**")
 
     st.divider()
 
-    pizza_name = st.session_state.current
-    correct_set = set(PIZZAS[pizza_name])
+    item_name = st.session_state.current
+    correct_set = set(ACTIVE_ITEMS[item_name])
 
-    st.subheader(f"Comanda: **{pizza_name}**")
-    st.caption("Elegí los ingredientes que lleva esa pizza (pueden ser varios).")
+    st.subheader(f"Comanda: **{item_name}**")
+    st.caption("Elegí los ingredientes correctos (pueden ser varios).")
 
     picked = st.multiselect(
         "Ingredientes",
         options=INGREDIENTS_MASTER,
         default=[],
-        key=f"pick_{pizza_name}_{st.session_state.total}"
+        key=f"pick_{st.session_state.dataset}_{item_name}_{st.session_state.total}"
     )
 
     col1, col2 = st.columns([1, 1])
@@ -355,7 +413,7 @@ with tab_quiz:
         next_btn = st.button("➡️ Siguiente (sin corregir)", use_container_width=True)
 
     if next_btn:
-        st.session_state.current = pick_next_with_queue()
+        st.session_state.current = pick_next_with_queue(ACTIVE_ITEMS, ACTIVE_STATS)
         st.session_state.last_result = None
         st.rerun()
 
@@ -363,7 +421,7 @@ with tab_quiz:
         chosen_set = set(picked)
         st.session_state.total += 1
 
-        stp = st.session_state.stats[pizza_name]
+        stp = ACTIVE_STATS[item_name]
         stp.seen += 1
         stp.last_seen_ts = time.time()
 
@@ -386,27 +444,14 @@ with tab_quiz:
             msg_parts.append(f"**Correcto era:** {', '.join(sorted(list(correct_set)))}")
             st.session_state.last_result = (False, "\n\n".join(msg_parts))
 
-            # 🔥 MODO DIFÍCIL: refuerzo espaciado progresivo (5 repeticiones)
+            # Refuerzo solo si Difícil
             if st.session_state.practice_mode == "Difícil":
-                pool = current_candidates() or list(PIZZAS.keys())
+                pool = current_candidates(ACTIVE_ITEMS) or list(ACTIVE_ITEMS.keys())
+                st.session_state.review_queue = [x for x in st.session_state.review_queue if x != item_name]
+                seq = build_spaced_reinforcement_sequence(target=item_name, pool=pool, repeats=5)
+                st.session_state.review_queue = (seq + st.session_state.review_queue)[:60]
 
-                # (opcional) limpiamos ocurrencias previas del mismo target para no inflar demasiado
-                st.session_state.review_queue = [x for x in st.session_state.review_queue if x != pizza_name]
-
-                seq = build_spaced_reinforcement_sequence(
-                    target=pizza_name,
-                    pool=pool,
-                    repeats=5,
-                )
-
-                # Lo ponemos al frente para que empiece "luego del error"
-                st.session_state.review_queue = seq + st.session_state.review_queue
-
-                # límite suave para no crecer infinito
-                st.session_state.review_queue = st.session_state.review_queue[:60]
-
-        # siguiente
-        st.session_state.current = pick_next_with_queue()
+        st.session_state.current = pick_next_with_queue(ACTIVE_ITEMS, ACTIVE_STATS)
         st.rerun()
 
     if st.session_state.last_result is not None:
@@ -415,52 +460,50 @@ with tab_quiz:
 
     st.divider()
 
-    # Lista de falladas
+    # Lista de falladas (solo del dataset activo)
     wrong_rows = []
-    for name, s in st.session_state.stats.items():
+    for name, s in ACTIVE_STATS.items():
         if s.wrong > 0:
             wrong_rows.append((name, s.wrong, s.seen, s.correct))
     wrong_rows.sort(key=lambda x: (-x[1], -x[2]))
 
-    st.subheader("❌ Pizzas donde te equivocaste")
+    st.subheader("❌ Ítems donde te equivocaste (dataset actual)")
     if not wrong_rows:
         st.info("Todavía no hay errores registrados.")
     else:
-        df_wrong = pd.DataFrame(wrong_rows, columns=["Pizza", "Errores", "Vistas", "Aciertos"])
+        df_wrong = pd.DataFrame(wrong_rows, columns=["Comanda", "Errores", "Vistas", "Aciertos"])
         st.dataframe(df_wrong, use_container_width=True, hide_index=True)
 
 
 with tab_repaso:
-    st.subheader("📚 Tabla completa (comanda → ingredientes)")
-    rows = []
-    for name, ings in PIZZAS.items():
-        rows.append({"Comanda": name, "Ingredientes": ", ".join(ings)})
+    st.subheader("📚 Tabla completa (comanda → ingredientes) - dataset actual")
+    rows = [{"Comanda": name, "Ingredientes": ", ".join(ings)} for name, ings in ACTIVE_ITEMS.items()]
     df = pd.DataFrame(rows).sort_values("Comanda")
     st.dataframe(df, use_container_width=True, hide_index=True)
 
 
 with tab_progreso:
-    st.subheader("💾 Exportar / Importar progreso")
+    st.subheader("💾 Exportar / Importar progreso (todos los datasets)")
 
     colx, coly = st.columns(2)
 
     with colx:
-        st.write("**Exportar** (descargás tu progreso en un JSON):")
+        st.write("**Exportar** (JSON):")
         st.download_button(
             "⬇️ Descargar progreso",
-            data=serialize_stats(st.session_state.stats),
-            file_name="progreso_pizzas.json",
+            data=serialize_stats_store(st.session_state.stats_store),
+            file_name="progreso_carta.json",
             mime="application/json",
             use_container_width=True
         )
 
     with coly:
-        st.write("**Importar** (subís tu JSON para continuar en otro dispositivo):")
-        up = st.file_uploader("Subí tu progreso_pizzas.json", type=["json"])
+        st.write("**Importar** (subí tu progreso_carta.json):")
+        up = st.file_uploader("Subí tu progreso_carta.json", type=["json"])
         if up is not None:
             try:
                 text = up.read().decode("utf-8")
-                st.session_state.stats = deserialize_stats(text)
+                st.session_state.stats_store = deserialize_stats_store(text)
                 st.success("Progreso importado ✅")
             except Exception as e:
                 st.error(f"No pude importar ese archivo: {e}")
@@ -468,11 +511,13 @@ with tab_progreso:
     st.divider()
 
     if st.button("🧹 Resetear progreso", use_container_width=True):
-        st.session_state.stats = default_stats()
+        st.session_state.stats_store = {name: default_stats_for(items) for name, items in DATASETS.items()}
         st.session_state.score = 0
         st.session_state.streak = 0
         st.session_state.total = 0
         st.session_state.review_queue = []
-        st.session_state.current = pick_next_with_queue()
+        ACTIVE_ITEMS = get_active_items()
+        ACTIVE_STATS = get_active_stats()
+        st.session_state.current = pick_next_with_queue(ACTIVE_ITEMS, ACTIVE_STATS)
         st.session_state.last_result = None
         st.success("Listo: progreso reseteado.")
