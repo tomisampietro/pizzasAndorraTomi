@@ -61,33 +61,33 @@ POST_HORNO: Dict[str, List[str]] = {
     "0 - MARINARA": ["albahaca", "aceite de oliva"],
     "N. 1": ["parmesano", "albahaca", "aceite de oliva"],
     "N. ANCHOIS": ["albahaca"],                      # ANCHOAS
-    "N. 3": ["orégano"],
+    "N. 3": ["oregano"],
     "N. SOBR": ["crema de nueces", "miel"],
-    "N. 5": ["yema de huevo", "orégano"],
+    "N. 5": ["yema de huevo", "oregano"],
     "MORTA PEST": ["mortadela", "burrata", "pistachos"],
     "N. 8": ["miel", "crema de nuez"],
-    "VEGAN!": ["rúcula", "aceite de oliva", "albahaca"],
-    "N. 10": ["orégano"],
-    "N. 12": ["parmesano", "orégano"],
-    "N. 14": ["rúcula", "albahaca", "aceite de oliva"],
-    "N. CURRY": ["nata", "coco rallado"],
-    "PESTO XERRI": ["parmesano", "rúcula", "albahaca", "aceite de oliva"],
+    "VEGAN!": ["rucula", "aceite de oliva", "albahaca"],
+    "N. 10": ["oregano"],
+    "N. 12": ["parmesano", "oregano"],
+    "N. 14": ["rucula", "albahaca", "aceite de oliva"],
+    "N. CURRY": ["coco rallado"],
+    "PESTO XERRI": ["parmesano", "rucula", "albahaca", "aceite de oliva"],
     "N. SPICY": ["piñones"],                          # 18 SPICY
-    "N. AUB, GOR": ["crema de nueces"],
+    "N. AUB, GOR": ["crema de nuez"],
     "N. 21": ["yema de huevo"],
-    "N. CECINA": ["rúcula", "miel", "orégano"],
+    "N. CECINA": ["rucula", "miel", "oregano"],
     "N. THON": ["albahaca"],
     "N. CANILL": ["yema de huevo"],
-    "SAUMON": ["rúcula"],
-    "SERRANO": ["jamón serrano", "burrata", "rúcula", "aceite de oliva", "albahaca"],  # N26 / Salamandres
+    "SAUMON": ["rucula"],
+    "SERRANO": ["jamón serrano", "burrata", "rucula", "aceite de oliva", "albahaca"],  # N26 / Salamandres
     "MAGRET": ["yema de huevo"],
 }
 
 # --- ENSALADAS (castellano) ---
 SALADS: Dict[str, List[str]] = {
-    "N*1 - ABELLETES": ["rúcula", "jamón serrano", "burrata", "tomate", "piñones", "cebolla", "albahaca"],
-    "N*2 - CUBILL": ["rúcula", "cecina de León", "tomate", "miel", "nueces"],
-    "N*3 - ENVALIRA": ["rúcula", "pesto", "atún", "cebolla", "tomate", "piñones"],
+    "N*1 - ABELLETES": ["rucula", "jamón serrano", "burrata", "tomate", "piñones", "cebolla", "albahaca"],
+    "N*2 - CUBILL": ["rucula", "cecina de León", "tomate", "miel", "nueces"],
+    "N*3 - ENVALIRA": ["rucula", "pesto", "atún", "cebolla", "tomate", "piñones"],
 }
 
 DATASETS: Dict[str, Dict[str, List[str]]] = {
